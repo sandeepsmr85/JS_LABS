@@ -1,0 +1,119 @@
+*{
+    padding: 0;
+    margin: 0;
+}
+
+body {
+    font-size:  10px;
+    background-color: white;
+    font-weight: normal;
+}
+
+nav ul {
+    display: flex;
+    justify-content: space-evenly;
+    list-style: none;
+    font-weight: bold;
+    padding: 10px;
+    margin-left: 15%;
+    margin-right: 15%;
+    }
+
+    nav ul li {
+    margin: 0 10px;
+}
+
+.nav-link {
+    font-size: 1.8em;
+    font-size: medium;
+    text-decoration: none;
+    color: black;
+    cursor: pointer;
+}
+
+#r {
+    background-color: yellow;
+    height: 500px;
+    font-size: 1.8em;
+    }
+ 
+.im {
+    display: flex;
+}
+
+.im1 {
+    margin-left: 10%;
+    }
+
+    .marg {
+    margin-left:20%;
+}
+
+.p1 {
+    text-shadow: 3px 2px whitesmoke;
+    font-size: 12px;
+    font-weight: lighter;
+    margin-left: 25%;
+}
+
+.p2 {
+text-shadow: 3px 2px whitesmoke;    
+font-size: 12px;
+font-weight: lighter;
+margin-left: 6%;
+}
+
+.p3 {
+    text-shadow: 3px 2px whitesmoke;    
+    font-size: 12px;
+    font-weight: lighter;
+    margin-left: 12%;
+    }
+
+.im2 {
+     margin-left: 15%;
+     margin-right: 18%;
+     }
+
+     .but {
+    font-weight: 550;
+    padding: 10px;
+    border-radius: 20px;
+    margin-left: 45%;
+    width: 150px;
+    border: none;
+    background-color: whitesmoke;
+    }
+
+    .cont {
+    margin-left: 15%;
+    margin-top: 2%;
+    margin-bottom: 2%;
+    display: flex;
+    }
+
+    .cont1 {
+    margin-right: 10%;
+    }
+
+    .l {
+list-style: none;
+color: darkgray;
+}
+
+.policy {
+    margin-left: 15%;
+    margin-right: 5%;
+    margin-top: 8px;
+}
+
+.term {
+  margin-top: 8px;
+}
+#f {
+    background-color: black;
+    color: white;
+    display: flex;
+    height: 25px;
+}
+
