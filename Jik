@@ -1,0 +1,73 @@
+import torch
+from transformers import GPT2Tokenizer, GPT2LMHeadModel
+
+# --- Configuration ---
+# Path to your fine-tuned model (the 'employee-dialogue-model' folder you saved)
+MODEL_PATH = './employee-dialogue-model'
+
+# --- Load the Fine-Tuned Model and Tokenizer ---
+print("Loading the fine-tuned model...")
+try:
+    tokenizer = GPT2Tokenizer.from_pretrained(MODEL_PATH)
+    # Add a padding token if it doesn't exist. This is crucial for batch generation.
+    if tokenizer.pad_token is None:
+        tokenizer.add_special_tokens({'pad_token': '[PAD]'})
+        model.resize_token_embeddings(len(tokenizer))
+
+    model = GPT2LMHeadModel.from_pretrained(MODEL_PATH)
+    print("Model loaded successfully!")
+except Exception as e:
+    print(f"Error loading model: {e}")
+    print("Please make sure you have run the fine-tuning script first and the model is saved in the correct directory.")
+    exit()
+
+# Set the device to GPU if available, otherwise CPU
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+model.to(device)
+model.eval() # Set the model to evaluation mode
+
+def generate_dialogue_from_topic(topic, num_sentences=3):
+    """
+    Takes a topic phrase and generates realistic employee dialogue about it.
+    """
+    if not topic:
+        return ["Please provide a topic."]
+        
+    # --- Prompt Engineering ---
+    # We create a natural-sounding start to a conversation about the topic.
+    # This guides the model to generate relevant sentences.
+    prompt_text = f"Hey, did you hear about the {topic}?"
+
+    input_ids = tokenizer.encode(prompt_text, return_tensors='pt').to(device)
+
+    # Generate text based on the prompt
+    output_sequences = model.generate(
+        input_ids=input_ids,
+        max_length=50,             # Max length of the generated sentence
+        num_return_sequences=num_sentences,
+        do_sample=True,            # Activates creative, non-repetitive generation
+        top_k=50,
+        top_p=0.95,
+        no_repeat_ngram_size=2,    # Avoids repeating phrases
+        pad_token_id=tokenizer.pad_token_id
+    )
+
+    # Decode the generated sentences
+    return [tokenizer.decode(seq, skip_special_tokens=True) for seq in output_sequences]
+
+# --- Main loop to get user input ---
+if __name__ == "__main__":
+    print("\n--- Employee Dialogue Generator (Topic-Based) ---")
+    print("Enter a topic phrase and press Enter. Type 'exit' to quit.")
+    
+    while True:
+        user_topic = input("\nTopic Phrase: ")
+        if user_topic.lower() == 'exit':
+            break
+            
+        print("...generating...")
+        sentences = generate_dialogue_from_topic(user_topic)
+        
+        print("\n--- Generated Sentences ---")
+        for i, sentence in enumerate(sentences):
+            print(f"{i+1}: {sentence}")
