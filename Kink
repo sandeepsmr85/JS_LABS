@@ -1,0 +1,307 @@
+#!/usr/bin/env python3
+"""
+airflow_client.py
+
+A single-file Airflow REST API client for common DAG / DAG run / task / log operations.
+
+Requirements:
+    pip install requests
+
+Usage:
+    - Import AirflowClient into your script, or run this file directly to see example usage.
+"""
+
+import os
+import json
+import requests
+from requests.auth import HTTPBasicAuth
+from typing import Optional, Dict, Any, List
+
+
+class AirflowClient:
+    """
+    A compact client for Airflow REST API (v1).
+    """
+
+    def __init__(self, base_url: str, username: str = "admin", password: str = "admin", timeout: int = 30):
+        self.base_url = base_url.rstrip("/")
+        self.auth = HTTPBasicAuth(username, password)
+        self.timeout = timeout
+
+    # -------------------------
+    # Internal helper
+    # -------------------------
+    def _request(self, method: str, path: str, **kwargs) -> Any:
+        url = f"{self.base_url}{path}"
+        try:
+            resp = requests.request(method, url, auth=self.auth, timeout=self.timeout, **kwargs)
+        except requests.RequestException as e:
+            return {"error": f"request failed: {e}"}
+
+        # Try to return JSON when available, otherwise return text
+        content_type = resp.headers.get("Content-Type", "")
+        if resp.status_code >= 400:
+            # try JSON
+            try:
+                return resp.json()
+            except Exception:
+                return {"error": resp.text, "status_code": resp.status_code}
+        if "application/json" in content_type:
+            try:
+                return resp.json()
+            except Exception:
+                return resp.text
+        else:
+            # e.g., logs endpoint returns text/html or plain text
+            return resp.text
+
+    # -------------------------
+    # DAG operations
+    # -------------------------
+    def list_dags(self, limit: int = 100, offset: int = 0) -> Any:
+        path = f"/dags?limit={limit}&offset={offset}"
+        return self._request("GET", path)
+
+    def get_dag_status(self, dag_id: str) -> Any:
+        path = f"/dags/{dag_id}"
+        return self._request("GET", path)
+
+    def pause_dag(self, dag_id: str) -> Any:
+        path = f"/dags/{dag_id}"
+        return self._request("PATCH", path, json={"is_paused": True})
+
+    def unpause_dag(self, dag_id: str) -> Any:
+        path = f"/dags/{dag_id}"
+        return self._request("PATCH", path, json={"is_paused": False})
+
+    def refresh_dag(self, dag_id: str) -> Any:
+        path = f"/dags/{dag_id}/refresh"
+        return self._request("POST", path)
+
+    def import_dag(self, file_path: str) -> Any:
+        """
+        Attempts to upload a DAG source file to Airflow via /dagSources endpoint.
+        Availability depends on Airflow deployment configuration.
+        """
+        path = "/dagSources"
+        if not os.path.isfile(file_path):
+            return {"error": f"file not found: {file_path}"}
+        try:
+            with open(file_path, "rb") as f:
+                files = {"file": (os.path.basename(file_path), f)}
+                return self._request("POST", path, files=files)
+        except Exception as e:
+            return {"error": f"failed to open/upload file: {e}"}
+
+    # -------------------------
+    # DAG run operations
+    # -------------------------
+    def trigger_dag(self, dag_id: str, conf: Optional[Dict] = None, run_id: Optional[str] = None) -> Any:
+        path = f"/dags/{dag_id}/dagRuns"
+        payload: Dict[str, Any] = {}
+        if conf is not None:
+            payload["conf"] = conf
+        if run_id is not None:
+            payload["dag_run_id"] = run_id
+        return self._request("POST", path, json=payload or None)
+
+    def list_dag_runs(self, dag_id: str, limit: int = 100, offset: int = 0) -> Any:
+        path = f"/dags/{dag_id}/dagRuns?limit={limit}&offset={offset}"
+        return self._request("GET", path)
+
+    def get_dag_run(self, dag_id: str, dag_run_id: str) -> Any:
+        path = f"/dags/{dag_id}/dagRuns/{dag_run_id}"
+        return self._request("GET", path)
+
+    def delete_dag_run(self, dag_id: str, dag_run_id: str) -> Any:
+        path = f"/dags/{dag_id}/dagRuns/{dag_run_id}"
+        return self._request("DELETE", path)
+
+    # -------------------------
+    # Task instance operations
+    # -------------------------
+    def list_task_instances(self, dag_id: str, dag_run_id: str) -> Any:
+        path = f"/dags/{dag_id}/dagRuns/{dag_run_id}/taskInstances"
+        return self._request("GET", path)
+
+    def get_task_instance(self, dag_id: str, dag_run_id: str, task_id: str) -> Any:
+        path = f"/dags/{dag_id}/dagRuns/{dag_run_id}/taskInstances/{task_id}"
+        return self._request("GET", path)
+
+    def clear_task_instance(self, dag_id: str, dag_run_id: str, task_id: str, include_subdags: bool = False,
+                            include_parentdag: bool = False, dry_run: bool = False) -> Any:
+        """
+        Clear (reset) a specific task instance so it can be re-scheduled / re-run.
+        """
+        path = f"/dags/{dag_id}/clearTaskInstances"
+        payload = {
+            "dry_run": dry_run,
+            "task_ids": [task_id],
+            "dag_run_id": dag_run_id,
+            "include_subdags": include_subdags,
+            "include_parentdag": include_parentdag,
+        }
+        return self._request("POST", path, json=payload)
+
+    def patch_task_instance_state(self, dag_id: str, dag_run_id: str, task_id: str, state: str) -> Any:
+        """
+        Generic method to PATCH the state of a task instance (workaround for mark_success/failed).
+        Note: depending on Airflow version & RBAC, this may be allowed or blocked.
+        """
+        path = f"/dags/{dag_id}/dagRuns/{dag_run_id}/taskInstances/{task_id}"
+        payload = {"state": state}
+        return self._request("PATCH", path, json=payload)
+
+    def mark_task_success(self, dag_id: str, dag_run_id: str, task_id: str) -> Any:
+        return self.patch_task_instance_state(dag_id, dag_run_id, task_id, "success")
+
+    def mark_task_failed(self, dag_id: str, dag_run_id: str, task_id: str) -> Any:
+        return self.patch_task_instance_state(dag_id, dag_run_id, task_id, "failed")
+
+    def retry_task(self, dag_id: str, dag_run_id: str, task_id: str, dry_run: bool = False) -> Any:
+        """
+        Retry a task by clearing it (so scheduler will re-run). This emulates CLI 'airflow tasks retry'.
+        """
+        return self.clear_task_instance(dag_id, dag_run_id, task_id, dry_run=dry_run)
+
+    # -------------------------
+    # Logs operations
+    # -------------------------
+    def get_task_log(self, dag_id: str, dag_run_id: str, task_id: str, try_number: int = 1) -> Any:
+        """
+        Returns log content (text) or JSON error response.
+        """
+        path = f"/dags/{dag_id}/dagRuns/{dag_run_id}/taskInstances/{task_id}/logs/{try_number}"
+        return self._request("GET", path)
+
+    def get_all_task_logs(self, dag_id: str, dag_run_id: str, output_dir: str = "logs") -> Dict[str, str]:
+        """
+        Fetch logs for all task instances in a DAG run and save each to a separate .log file.
+        Returns a mapping of task_id -> file_path (or task_id -> error string).
+        """
+        os.makedirs(output_dir, exist_ok=True)
+        results: Dict[str, str] = {}
+        tasks_resp = self.list_task_instances(dag_id, dag_run_id)
+        if isinstance(tasks_resp, dict) and tasks_resp.get("error"):
+            return {"error": str(tasks_resp)}
+
+        tasks = tasks_resp.get("task_instances", []) if isinstance(tasks_resp, dict) else []
+        for task in tasks:
+            task_id = task.get("task_id")
+            try_number = task.get("try_number", 1) or 1
+            log_content = self.get_task_log(dag_id, dag_run_id, task_id, try_number)
+
+            # If log_content is dict (error), convert to string
+            if isinstance(log_content, dict):
+                file_content = json.dumps(log_content, indent=2)
+            else:
+                file_content = str(log_content)
+
+            safe_task_id = task_id.replace("/", "_").replace(" ", "_") if task_id else "unknown_task"
+            safe_dag_run_id = str(dag_run_id).replace("/", "_").replace(" ", "_")
+            filename = f"{dag_id}__{safe_dag_run_id}__{safe_task_id}.log"
+            file_path = os.path.join(output_dir, filename)
+
+            try:
+                with open(file_path, "w", encoding="utf-8") as f:
+                    f.write(file_content)
+                results[task_id] = file_path
+            except Exception as e:
+                results[task_id] = f"error_writing_file: {e}"
+
+        return results
+
+    def get_combined_run_log(self, dag_id: str, dag_run_id: str, output_file: Optional[str] = None) -> str:
+        """
+        Combine all task logs into one file (or return combined content if output_file is None).
+        Returns path or content string.
+        """
+        tasks_resp = self.list_task_instances(dag_id, dag_run_id)
+        if isinstance(tasks_resp, dict) and tasks_resp.get("error"):
+            return json.dumps(tasks_resp)
+
+        tasks = tasks_resp.get("task_instances", []) if isinstance(tasks_resp, dict) else []
+        parts: List[str] = []
+        for task in tasks:
+            task_id = task.get("task_id")
+            try_number = task.get("try_number", 1) or 1
+            log_content = self.get_task_log(dag_id, dag_run_id, task_id, try_number)
+            header = f"\n\n--- Task: {task_id} | try: {try_number} ---\n"
+            if isinstance(log_content, dict):
+                parts.append(header + json.dumps(log_content, indent=2))
+            else:
+                parts.append(header + str(log_content))
+
+        combined = "\n".join(parts)
+        if output_file:
+            try:
+                with open(output_file, "w", encoding="utf-8") as f:
+                    f.write(combined)
+                return output_file
+            except Exception as e:
+                return f"error_writing_combined_file: {e}"
+        else:
+            return combined
+
+
+# -------------------------
+# Example usage (script)
+# -------------------------
+if __name__ == "__main__":
+    # Example configuration - change to match your Airflow instance
+    BASE_URL = "http://localhost:8080/api/v1"  # include /api/v1
+    USERNAME = "admin"
+    PASSWORD = "admin"
+
+    client = AirflowClient(BASE_URL, USERNAME, PASSWORD)
+
+    # Replace with a real DAG id from your environment
+    example_dag_id = "example_dag"
+
+    print("Listing DAGs (first page):")
+    print(client.list_dags())
+
+    print("\nGetting DAG status:")
+    print(client.get_dag_status(example_dag_id))
+
+    print("\nTriggering DAG (no conf):")
+    run_resp = client.trigger_dag(example_dag_id)
+    print(run_resp)
+
+    # Try to extract dag_run_id (API responses vary)
+    dag_run_id = None
+    if isinstance(run_resp, dict):
+        # typical key is 'dag_run_id' but some Airflow deployments return other structures
+        dag_run_id = run_resp.get("dag_run_id") or run_resp.get("dag_run", {}).get("dag_run_id")
+    if not dag_run_id:
+        # fallback: list recent runs and pick the most recent
+        runs = client.list_dag_runs(example_dag_id)
+        if isinstance(runs, dict):
+            dag_runs = runs.get("dag_runs", [])
+            if dag_runs:
+                dag_run_id = dag_runs[0].get("dag_run_id")
+
+    if dag_run_id:
+        print(f"\nUsing dag_run_id: {dag_run_id}")
+
+        # List task instances for the run
+        tasks = client.list_task_instances(example_dag_id, dag_run_id)
+        print("\nTask instances for run:")
+        print(tasks)
+
+        # Save all task logs to files
+        print("\nSaving all task logs to 'logs/' directory...")
+        saved = client.get_all_task_logs(example_dag_id, dag_run_id, output_dir="logs")
+        print(saved)
+
+        # Create a combined log file
+        combined_path = client.get_combined_run_log(example_dag_id, dag_run_id, output_file=f"logs/{example_dag_id}__{dag_run_id}__combined.log")
+        print("\nCombined log saved at:", combined_path)
+
+        # Example task-level changes (use real task_ids from your run)
+        # task_id_example = "task1"
+        # print(client.mark_task_success(example_dag_id, dag_run_id, task_id_example))
+        # print(client.mark_task_failed(example_dag_id, dag_run_id, task_id_example))
+        # print(client.retry_task(example_dag_id, dag_run_id, task_id_example))
+    else:
+        print("Could not determine dag_run_id from trigger response or list_dag_runs.")
